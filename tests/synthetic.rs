@@ -4,6 +4,8 @@
 use slide_detect::{Error, Event, ExtractError, Slide, SlideParams, VideoInfo, detect};
 use std::path::Path;
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 const FFMPEG: &str = "ffmpeg";
 
@@ -202,5 +204,38 @@ fn a_failed_image_names_its_slide() {
             source: ExtractError::Failed { .. },
         }) => assert_eq!(onset, 0.0),
         other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn cancelling_midway_stops_either_pass_promptly() {
+    if !ffmpeg_available() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let video = dir.path().join("synthetic.mp4");
+    make_video(&video, 20, &[("black", 6.25, 20.)]);
+    let stops: [fn(&Event) -> bool; 2] = [
+        |event| matches!(event, Event::Sampled { frames: 3 }),
+        |event| matches!(event, Event::ExtractStarted { .. }),
+    ];
+    for stop_at in stops {
+        let flag = AtomicBool::new(false);
+        let started = Instant::now();
+        let result = detect(
+            Path::new(FFMPEG),
+            &video,
+            info(20),
+            &params(0.0, 0.0),
+            &dir.path().join("frames"),
+            &|| flag.load(Ordering::Relaxed),
+            &mut |event| {
+                if stop_at(&event) {
+                    flag.store(true, Ordering::Relaxed);
+                }
+            },
+        );
+        assert!(matches!(result, Err(Error::Cancelled)), "{result:?}");
+        assert!(started.elapsed() < Duration::from_secs(30));
     }
 }
