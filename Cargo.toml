@@ -1,0 +1,19 @@
+[package]
+name = "slide-detect"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Find the slide changes in a lecture video with ffmpeg and SSIM, and extract a full-resolution image of each"
+repository = "https://github.com/mizorewww/slide-detect"
+readme = "README.md"
+keywords = ["slides", "video", "ffmpeg", "ssim", "scene-detection"]
+categories = ["multimedia::video"]
+# Consumed as a git dependency; see README.
+publish = false
+
+[dependencies]
+image = { version = "0.25", default-features = false }
+image-compare = "0.5"
+
+[dev-dependencies]
+tempfile = "3"
