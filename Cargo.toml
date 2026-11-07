@@ -11,9 +11,22 @@ categories = ["multimedia::video"]
 # Consumed as a git dependency; see README.
 publish = false
 
+[features]
+# The `slide-detect` command-line tool. Library users get none of its dependencies.
+cli = ["dep:clap", "dep:ctrlc", "dep:serde_json", "dep:tempfile"]
+
+[[bin]]
+name = "slide-detect"
+path = "src/bin/slide-detect/main.rs"
+required-features = ["cli"]
+
 [dependencies]
 image = { version = "0.25", default-features = false }
 image-compare = "0.5"
+clap = { version = "4.6", features = ["derive"], optional = true }
+ctrlc = { version = "3.5", features = ["termination"], optional = true }
+serde_json = { version = "1", optional = true }
+tempfile = { version = "3", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
