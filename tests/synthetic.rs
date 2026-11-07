@@ -1,7 +1,9 @@
 //! End to end on a video ffmpeg generates: page changes between samples, so what
 //! each sample sees is certain. Needs ffmpeg; skipped without it unless `CI` is set.
 
-use slide_detect::{Error, Event, ExtractError, Slide, SlideParams, VideoInfo, detect};
+use slide_detect::{
+    Error, Event, ExtractError, Slide, SlideParams, SlideTime, VideoInfo, detect, scan,
+};
 use std::path::Path;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -238,4 +240,75 @@ fn cancelling_midway_stops_either_pass_promptly() {
         assert!(matches!(result, Err(Error::Cancelled)), "{result:?}");
         assert!(started.elapsed() < Duration::from_secs(30));
     }
+}
+
+#[test]
+fn scan_finds_the_times_and_writes_nothing() {
+    if !ffmpeg_available() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let video = dir.path().join("synthetic.mp4");
+    make_video(
+        &video,
+        20,
+        &[
+            ("black", 6.25, 7.25),
+            ("gray", 7.25, 14.25),
+            ("white", 14.25, 20.),
+        ],
+    );
+    let mut events = Vec::new();
+    let times = scan(
+        Path::new(FFMPEG),
+        &video,
+        info(20),
+        &params(10.0, 0.0),
+        &|| false,
+        &mut |event| events.push(event),
+    )
+    .unwrap();
+    let time = |onset, capture| SlideTime { onset, capture };
+    assert_eq!(times, [time(0.0, 0.0), time(7.5, 10.0), time(14.5, 19.5)]);
+    let written = std::fs::read_dir(dir.path()).unwrap().count();
+    assert_eq!(written, 1, "the video alone");
+    // The same times `detect` finds, and only the scan's events.
+    let out = dir.path().join("frames");
+    let (slides, _) = run(&video, 20, params(10.0, 0.0), &out);
+    let found: Vec<_> = slides
+        .iter()
+        .map(|slide| time(slide.onset, slide.capture))
+        .collect();
+    assert_eq!(found, times);
+    assert_eq!(
+        events.last(),
+        Some(&Event::ScanFinished {
+            frames: 40,
+            slides: 3
+        })
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, Event::ExtractStarted { .. }))
+    );
+}
+
+#[test]
+fn a_set_cancel_flag_stops_a_scan_alone() {
+    if !ffmpeg_available() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let video = dir.path().join("synthetic.mp4");
+    make_video(&video, 2, &[("black", 0.75, 2.)]);
+    let result = scan(
+        Path::new(FFMPEG),
+        &video,
+        info(2),
+        &params(0.0, 0.0),
+        &|| true,
+        &mut |_| {},
+    );
+    assert!(matches!(result, Err(Error::Cancelled)));
 }

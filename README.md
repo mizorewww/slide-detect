@@ -48,7 +48,11 @@ for slide in slides {
 # Ok::<(), slide_detect::Error>(())
 ```
 
-`detect` blocks; run it on its own thread in an async program. It stops all ffmpeg
+`scan` takes the same arguments except the output directory, and returns each
+slide's `onset` and `capture` without extracting any image; `detect` is `scan`
+followed by the extraction.
+
+Both block; run them on their own thread in an async program. They stop all ffmpeg
 processes within about a tenth of a second of `cancelled` returning true.
 
 Not on crates.io yet; depend on it by Git revision.
