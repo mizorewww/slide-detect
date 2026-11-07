@@ -377,3 +377,20 @@ fn an_image_that_cannot_be_replaced_writes_none() {
         .collect();
     assert_eq!(names, ["slide_0002_00-00-07.500.jpg"]);
 }
+
+#[test]
+fn a_video_shorter_than_the_interval_is_explained() {
+    if !ffmpeg_available() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let video = dir.path().join("short.mp4");
+    make_video(&video, 1, &[("black", 0.5, 1.)]);
+    let output = run(&["scan", "-q", "--sample-interval", "5"], &video);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        stderr(&output).contains("the video may be shorter than --sample-interval"),
+        "{}",
+        stderr(&output)
+    );
+}

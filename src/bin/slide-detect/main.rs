@@ -240,7 +240,9 @@ fn describe(error: Error, ffmpeg: &Path, video: &Path) -> Failure {
         Error::ScanFailed { status, stderr } => {
             format!("ffmpeg could not read {video} ({status}):\n{stderr}")
         }
-        Error::NoFrames => format!("ffmpeg decoded no frames from {video}"),
+        Error::NoFrames => format!(
+            "no frame was sampled from {video}; the video may be shorter than --sample-interval"
+        ),
         Error::Extract {
             number,
             onset,
