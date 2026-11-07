@@ -172,7 +172,14 @@ fn with_library<T>(
     if video.is_dir() {
         return Err(format!("{}: is a directory, not a video", video.display()).into());
     }
-    let info = ffmpeg::probe(&ffmpeg, video)?;
+    // Ctrl-C at a terminal stops the probe's ffmpeg too: then the cancel is the reason.
+    let info = ffmpeg::probe(&ffmpeg, video).map_err(|message| {
+        if cancelled.load(Ordering::Relaxed) {
+            Failure::Cancelled
+        } else {
+            Failure::Error(message)
+        }
+    })?;
     let params = SlideParams {
         sample_interval: common.sample_interval,
         similarity: common.similarity,

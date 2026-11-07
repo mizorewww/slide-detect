@@ -286,3 +286,47 @@ fn ctrl_c_cancels_cleanly() {
     // No image, and no staging directory left behind.
     assert_eq!(std::fs::read_dir(&out).unwrap().count(), 0);
 }
+
+/// A Ctrl-C while ffmpeg describes the video, before any scan, cancels too.
+#[cfg(unix)]
+#[test]
+fn ctrl_c_during_the_probe_cancels() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::process::CommandExt;
+    use std::time::{Duration, Instant};
+
+    let dir = tempfile::tempdir().unwrap();
+    let video = dir.path().join("video.mp4");
+    std::fs::write(&video, b"").unwrap();
+    // An "ffmpeg" that announces itself and hangs, as on a slow network disk.
+    let started = dir.path().join("started");
+    let ffmpeg = dir.path().join("ffmpeg");
+    std::fs::write(
+        &ffmpeg,
+        format!("#!/bin/sh\ntouch '{}'\nexec sleep 30\n", started.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&ffmpeg, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let child = Command::new(BIN)
+        .args(["scan", "--ffmpeg"])
+        .arg(&ffmpeg)
+        .arg(&video)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !started.exists() {
+        assert!(Instant::now() < deadline, "the probe never started");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let status = Command::new("kill")
+        .args(["-INT", "--", &format!("-{}", child.id())])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(130), "{}", stderr(&output));
+    assert_eq!(stderr(&output), "slide-detect: cancelled\n");
+}
