@@ -2,8 +2,13 @@
 
 use slide_detect::VideoInfo;
 use std::ffi::OsStr;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::Duration;
+
+/// How often the probe looks at `cancelled`.
+const POLL: Duration = Duration::from_millis(20);
 
 /// How many lines of ffmpeg's output to quote when the probe fails.
 const STDERR_LINES: usize = 5;
@@ -47,16 +52,47 @@ fn candidates(path: PathBuf) -> Vec<PathBuf> {
     vec![path]
 }
 
-/// Runs `ffmpeg -i`, which describes the input on stderr and exits.
-pub fn probe(ffmpeg: &Path, video: &Path) -> Result<VideoInfo, String> {
-    let output = Command::new(ffmpeg)
+/// Runs `ffmpeg -i`, which describes the input on stderr and exits. Once
+/// `cancelled` returns true ffmpeg is killed, and the caller reports the cancel.
+pub fn probe(
+    ffmpeg: &Path,
+    video: &Path,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<VideoInfo, String> {
+    let mut child = Command::new(ffmpeg)
         .args(["-hide_banner", "-nostdin", "-i"])
         .arg(video)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .output()
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|error| format!("could not start {}: {error}", ffmpeg.display()))?;
-    let text = String::from_utf8_lossy(&output.stderr);
+    let stderr = child.stderr.take();
+    let reader = std::thread::spawn(move || {
+        let mut text = Vec::new();
+        if let Some(mut stderr) = stderr {
+            let _ = stderr.read_to_end(&mut text);
+        }
+        text
+    });
+    loop {
+        if cancelled() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("cancelled".to_owned());
+        }
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => std::thread::sleep(POLL),
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("could not run {}: {error}", ffmpeg.display()));
+            }
+        }
+    }
+    let text = reader.join().unwrap_or_default();
+    let text = String::from_utf8_lossy(&text);
     parse(&text).ok_or_else(|| {
         let lines: Vec<_> = text
             .lines()

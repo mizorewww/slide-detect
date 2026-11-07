@@ -291,6 +291,24 @@ fn ctrl_c_cancels_cleanly() {
 #[cfg(unix)]
 #[test]
 fn ctrl_c_during_the_probe_cancels() {
+    let output = signal_during_the_probe("-INT", true);
+    assert_eq!(output.status.code(), Some(130), "{}", stderr(&output));
+    assert_eq!(stderr(&output), "slide-detect: cancelled\n");
+}
+
+/// SIGTERM, as a service manager sends to the process alone, exits 128 + 15.
+#[cfg(unix)]
+#[test]
+fn sigterm_exits_143() {
+    let output = signal_during_the_probe("-TERM", false);
+    assert_eq!(output.status.code(), Some(143), "{}", stderr(&output));
+    assert_eq!(stderr(&output), "slide-detect: terminated\n");
+}
+
+/// Sends `signal` to the tool's process group, as a terminal does, or to the tool
+/// alone, while a fake ffmpeg hangs in the probe.
+#[cfg(unix)]
+fn signal_during_the_probe(signal: &str, group: bool) -> Output {
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::process::CommandExt;
     use std::time::{Duration, Instant};
@@ -321,14 +339,17 @@ fn ctrl_c_during_the_probe_cancels() {
         assert!(Instant::now() < deadline, "the probe never started");
         std::thread::sleep(Duration::from_millis(20));
     }
+    let target = if group {
+        format!("-{}", child.id())
+    } else {
+        child.id().to_string()
+    };
     let status = Command::new("kill")
-        .args(["-INT", "--", &format!("-{}", child.id())])
+        .args([signal, "--", &target])
         .status()
         .unwrap();
     assert!(status.success());
-    let output = child.wait_with_output().unwrap();
-    assert_eq!(output.status.code(), Some(130), "{}", stderr(&output));
-    assert_eq!(stderr(&output), "slide-detect: cancelled\n");
+    child.wait_with_output().unwrap()
 }
 
 #[test]

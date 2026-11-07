@@ -13,7 +13,13 @@ publish = false
 
 [features]
 # The `slide-detect` command-line tool. Library users get none of its dependencies.
-cli = ["dep:clap", "dep:ctrlc", "dep:serde_json", "dep:tempfile"]
+cli = [
+    "dep:clap",
+    "dep:ctrlc",
+    "dep:serde_json",
+    "dep:signal-hook",
+    "dep:tempfile",
+]
 
 [[bin]]
 name = "slide-detect"
@@ -24,9 +30,15 @@ required-features = ["cli"]
 image = { version = "0.25", default-features = false }
 image-compare = "0.5"
 clap = { version = "4.6", features = ["derive"], optional = true }
-ctrlc = { version = "3.5", features = ["termination"], optional = true }
 serde_json = { version = "1", optional = true }
 tempfile = { version = "3", optional = true }
+
+# Ctrl-C and SIGTERM, told apart for the exit code.
+[target.'cfg(unix)'.dependencies]
+signal-hook = { version = "0.4", default-features = false, optional = true }
+
+[target.'cfg(windows)'.dependencies]
+ctrlc = { version = "3.5", optional = true }
 
 [dev-dependencies]
 tempfile = "3"

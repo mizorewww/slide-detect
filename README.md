@@ -98,8 +98,10 @@ $ slide-detect extract lecture.mp4 -o slides
 - `--sample-interval`, `--similarity`, `--cooldown`, `--stable-secs` and
   `--roi X1,Y1,X2,Y2` set the fields of `SlideParams`; the defaults are 1, 0.85, 5,
   0 and the whole frame.
-- Progress goes to stderr; `--quiet` hides it. Ctrl-C stops every ffmpeg and exits.
-- Exit codes: 0 on success, 1 on failure, 2 on a usage error, 130 when cancelled.
+- Progress goes to stderr; `--quiet` hides it. Ctrl-C or SIGTERM stops every ffmpeg
+  and exits.
+- Exit codes: 0 on success, 1 on failure, 2 on a usage error, 130 on Ctrl-C (SIGINT)
+  and 143 on SIGTERM.
 
 ## License
 

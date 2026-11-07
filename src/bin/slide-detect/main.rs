@@ -1,6 +1,7 @@
 //! `slide-detect`: the slides of a lecture video, from the command line.
 //!
-//! Exit codes: 0 on success, 1 on failure, 2 on a usage error, 130 when cancelled.
+//! Exit codes: 0 on success, 1 on failure, 2 on a usage error, 130 when cancelled
+//! by Ctrl-C (SIGINT), 143 when terminated (SIGTERM).
 
 mod ffmpeg;
 mod output;
@@ -13,7 +14,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Parser)]
 #[command(
@@ -21,7 +22,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
     version,
     about = "Find the slide changes in a lecture video, and extract a full-resolution image of each",
     after_help = "Needs ffmpeg: on PATH, or given with --ffmpeg.\n\
-                  Exit codes: 0 success, 1 failure, 2 usage error, 130 cancelled."
+                  Exit codes: 0 success, 1 failure, 2 usage error, 130 Ctrl-C, 143 SIGTERM."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -92,18 +93,27 @@ impl From<String> for Failure {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let cancelled = Arc::new(AtomicBool::new(false));
-    let flag = Arc::clone(&cancelled);
-    if let Err(error) = ctrlc::set_handler(move || flag.store(true, Ordering::Relaxed)) {
+    let signal = Arc::new(AtomicUsize::new(0));
+    if let Err(error) = listen(&signal) {
         progress::say(&format!(
             "slide-detect: warning: Ctrl-C will not cancel cleanly: {error}"
         ));
     }
-    match run(cli, &cancelled) {
+    match run(cli, &signal) {
         Ok(()) => ExitCode::SUCCESS,
         Err(Failure::Cancelled) => {
-            progress::say("slide-detect: cancelled");
-            ExitCode::from(130)
+            let signal = match signal.load(Ordering::Relaxed) {
+                0 => SIGINT,
+                signal => signal,
+            };
+            let word = if signal == SIGTERM {
+                "terminated"
+            } else {
+                "cancelled"
+            };
+            progress::say(&format!("slide-detect: {word}"));
+            // The shell's convention for a death by signal.
+            ExitCode::from(128 + signal as u8)
         }
         Err(Failure::Error(message)) => {
             progress::say(&format!("slide-detect: error: {message}"));
@@ -112,7 +122,35 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(cli: Cli, cancelled: &AtomicBool) -> Result<(), Failure> {
+#[cfg(unix)]
+use signal_hook::consts::{SIGINT as SIGINT_C, SIGTERM as SIGTERM_C};
+#[cfg(unix)]
+const SIGINT: usize = SIGINT_C as usize;
+#[cfg(unix)]
+const SIGTERM: usize = SIGTERM_C as usize;
+#[cfg(not(unix))]
+const SIGINT: usize = 2;
+#[cfg(not(unix))]
+const SIGTERM: usize = 15;
+
+/// Stores the number of the first stopping signal in `signal`; the library sees it
+/// through `cancelled` and stops every ffmpeg.
+#[cfg(unix)]
+fn listen(signal: &Arc<AtomicUsize>) -> std::io::Result<()> {
+    for number in [SIGINT_C, SIGTERM_C] {
+        signal_hook::flag::register_usize(number, Arc::clone(signal), number as usize)?;
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn listen(signal: &Arc<AtomicUsize>) -> std::io::Result<()> {
+    let signal = Arc::clone(signal);
+    ctrlc::set_handler(move || signal.store(SIGINT, Ordering::Relaxed))
+        .map_err(std::io::Error::other)
+}
+
+fn run(cli: Cli, cancelled: &AtomicUsize) -> Result<(), Failure> {
     match cli.command {
         Command::Scan { common } => {
             let times = with_library(&common, cancelled, scan)?;
@@ -181,7 +219,7 @@ fn check_replaceable(dir: &Path, names: &[String]) -> Result<(), Failure> {
 /// The checks and probe both commands need, then `call`: [`scan`] or [`detect`].
 fn with_library<T>(
     common: &Common,
-    cancelled: &AtomicBool,
+    cancelled: &AtomicUsize,
     call: impl FnOnce(
         &Path,
         &Path,
@@ -199,9 +237,10 @@ fn with_library<T>(
     if video.is_dir() {
         return Err(format!("{}: is a directory, not a video", video.display()).into());
     }
-    // Ctrl-C at a terminal stops the probe's ffmpeg too: then the cancel is the reason.
-    let info = ffmpeg::probe(&ffmpeg, video).map_err(|message| {
-        if cancelled.load(Ordering::Relaxed) {
+    let is_cancelled = || cancelled.load(Ordering::Relaxed) != 0;
+    // A signal during the probe stops its ffmpeg, and is then the reason it failed.
+    let info = ffmpeg::probe(&ffmpeg, video, &is_cancelled).map_err(|message| {
+        if is_cancelled() {
             Failure::Cancelled
         } else {
             Failure::Error(message)
@@ -215,18 +254,13 @@ fn with_library<T>(
         roi: common.roi,
     };
     let mut progress = Progress::new(common.quiet);
-    let result = call(
-        &ffmpeg,
-        video,
-        info,
-        &params,
-        &|| cancelled.load(Ordering::Relaxed),
-        &mut |event| progress.event(event),
-    );
+    let result = call(&ffmpeg, video, info, &params, &is_cancelled, &mut |event| {
+        progress.event(event)
+    });
     progress.finish();
     // A Ctrl-C at a terminal reaches ffmpeg too, which may then fail before the
     // library sees the flag: the user's cancel is the reason either way.
-    if cancelled.load(Ordering::Relaxed) {
+    if is_cancelled() {
         return Err(Failure::Cancelled);
     }
     result.map_err(|error| describe(error, &ffmpeg, video))
