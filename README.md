@@ -53,6 +53,51 @@ processes within about a tenth of a second of `cancelled` returning true.
 
 Not on crates.io yet; depend on it by Git revision.
 
+## Command-line tool
+
+The crate also builds `slide-detect`, a command-line tool over the same library,
+behind the `cli` feature. Library users do not get its dependencies.
+
+```sh
+cargo install --git https://github.com/mizorewww/slide-detect --features cli
+```
+
+It needs ffmpeg on `PATH`, or its path given with `--ffmpeg`.
+
+```console
+$ slide-detect scan lecture.mp4
+Scanning: about 3600 frames to sample
+Scanned 3600 frames: 42 slides
+Extracting 42 images
+Extracted 42 images
+    #  ONSET         CAPTURE
+    1  00:00:00.000  00:00:00.000
+    2  00:01:07.000  00:01:12.000
+  ...
+
+$ slide-detect extract lecture.mp4 -o slides
+...
+    #  ONSET         CAPTURE       FILE
+    1  00:00:00.000  00:00:00.000  slide_0001_00-00-00.000.jpg
+    2  00:01:07.000  00:01:12.000  slide_0002_00-01-07.000.jpg
+  ...
+```
+
+- `scan <VIDEO>` prints when each slide first appears (`ONSET`) and when its image
+  is taken (`CAPTURE`). The library always extracts what it finds, so `scan` decodes
+  the images too, into a temporary directory it deletes.
+- `extract <VIDEO> -o <DIR>` writes a full-resolution JPEG of each slide, named by
+  number and onset, replacing files of the same name. A failed or cancelled run
+  leaves no images behind.
+- `--json` prints JSON instead of a table: `video`, (for `extract`) `output`, and
+  `slides`, each with `number`, `onset` and `capture` in seconds and (for `extract`)
+  `file`.
+- `--sample-interval`, `--similarity`, `--cooldown`, `--stable-secs` and
+  `--roi X1,Y1,X2,Y2` set the fields of `SlideParams`; the defaults are 1, 0.85, 5,
+  0 and the whole frame.
+- Progress goes to stderr; `--quiet` hides it. Ctrl-C stops every ffmpeg and exits.
+- Exit codes: 0 on success, 1 on failure, 2 on a usage error, 130 when cancelled.
+
 ## License
 
 [MIT](LICENSE)
