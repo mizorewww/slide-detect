@@ -83,7 +83,7 @@ impl Progress {
             return;
         }
         self.clear();
-        eprintln!("{text}");
+        say(text);
     }
 
     fn live(&mut self, text: &str) {
@@ -103,6 +103,12 @@ impl Progress {
             let _ = stderr.flush();
         }
     }
+}
+
+/// A line on stderr. Unlike `eprintln!`, a closed stderr is not a panic: there is
+/// nobody left to tell.
+pub fn say(text: &str) {
+    let _ = writeln!(std::io::stderr().lock(), "{text}");
 }
 
 fn plural(count: usize, word: &str) -> String {

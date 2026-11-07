@@ -95,16 +95,18 @@ fn main() -> ExitCode {
     let cancelled = Arc::new(AtomicBool::new(false));
     let flag = Arc::clone(&cancelled);
     if let Err(error) = ctrlc::set_handler(move || flag.store(true, Ordering::Relaxed)) {
-        eprintln!("slide-detect: warning: Ctrl-C will not cancel cleanly: {error}");
+        progress::say(&format!(
+            "slide-detect: warning: Ctrl-C will not cancel cleanly: {error}"
+        ));
     }
     match run(cli, &cancelled) {
         Ok(()) => ExitCode::SUCCESS,
         Err(Failure::Cancelled) => {
-            eprintln!("slide-detect: cancelled");
+            progress::say("slide-detect: cancelled");
             ExitCode::from(130)
         }
         Err(Failure::Error(message)) => {
-            eprintln!("slide-detect: error: {message}");
+            progress::say(&format!("slide-detect: error: {message}"));
             ExitCode::FAILURE
         }
     }

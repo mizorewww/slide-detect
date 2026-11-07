@@ -330,3 +330,18 @@ fn ctrl_c_during_the_probe_cancels() {
     assert_eq!(output.status.code(), Some(130), "{}", stderr(&output));
     assert_eq!(stderr(&output), "slide-detect: cancelled\n");
 }
+
+#[test]
+fn a_closed_stderr_is_not_a_panic() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut child = Command::new(BIN)
+        .args(["scan", "--ffmpeg"])
+        .arg(dir.path().join("no-such-ffmpeg"))
+        .arg(dir.path().join("video.mp4"))
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    // Nobody reads the error: writing it fails.
+    drop(child.stderr.take());
+    assert_eq!(child.wait().unwrap().code(), Some(1), "not 101, a panic");
+}
