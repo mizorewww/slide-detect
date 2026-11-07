@@ -1,7 +1,7 @@
 //! What goes to stdout: a table for people, or JSON for programs.
 
 use serde_json::json;
-use slide_detect::Slide;
+use slide_detect::{Slide, SlideTime};
 use std::fmt::Write;
 use std::path::Path;
 
@@ -32,7 +32,7 @@ fn seconds(secs: f64) -> f64 {
     millis(secs) as f64 / 1000.0
 }
 
-pub fn scan_table(slides: &[Slide]) -> String {
+pub fn scan_table(slides: &[SlideTime]) -> String {
     let mut out = format!("{:>5}  {:<12}  CAPTURE\n", "#", "ONSET");
     for (index, slide) in slides.iter().enumerate() {
         let _ = writeln!(
@@ -60,7 +60,7 @@ pub fn extract_table(slides: &[Slide], files: &[String]) -> String {
     out
 }
 
-pub fn scan_json(video: &Path, slides: &[Slide]) -> String {
+pub fn scan_json(video: &Path, slides: &[SlideTime]) -> String {
     let slides: Vec<_> = slides
         .iter()
         .enumerate()
@@ -121,10 +121,9 @@ mod tests {
 
     #[test]
     fn json_lists_every_slide() {
-        let slides = [Slide {
+        let slides = [SlideTime {
             onset: 7.5,
             capture: 10.0,
-            file_name: "slide_0001.jpg".into(),
         }];
         let value: serde_json::Value =
             serde_json::from_str(&scan_json(Path::new("a \"b\".mp4"), &slides)).unwrap();

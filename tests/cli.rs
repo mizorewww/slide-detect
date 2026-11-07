@@ -85,7 +85,16 @@ fn scan_prints_the_true_times() {
     }
     let dir = tempfile::tempdir().unwrap();
     let video = lecture(dir.path());
-    let output = run(&[&["scan", "--json"][..], &TUNING[..]].concat(), &video);
+    let tmp = dir.path().join("tmp");
+    std::fs::create_dir(&tmp).unwrap();
+    let output = Command::new(BIN)
+        .args([&["scan", "--json"][..], &TUNING[..]].concat())
+        .arg(&video)
+        .env("TMPDIR", &tmp)
+        .env("TEMP", &tmp)
+        .env("TMP", &tmp)
+        .output()
+        .unwrap();
     assert!(output.status.success(), "{}", stderr(&output));
     let value = json(&output);
     let onsets: Vec<_> = value["slides"]
@@ -99,6 +108,9 @@ fn scan_prints_the_true_times() {
     assert_eq!(value["slides"][1]["number"], 2);
     // Progress went to stderr, and only the JSON to stdout.
     assert!(stderr(&output).contains("Scanned 40 frames: 3 slides"));
+    // No image was extracted, not even to a temporary directory.
+    assert!(!stderr(&output).contains("Extract"), "{}", stderr(&output));
+    assert_eq!(std::fs::read_dir(&tmp).unwrap().count(), 0);
 }
 
 #[test]

@@ -8,7 +8,7 @@ mod progress;
 
 use clap::{Args, Parser, Subcommand};
 use progress::Progress;
-use slide_detect::{Error, Roi, Slide, SlideParams, detect};
+use slide_detect::{Error, Event, Roi, SlideParams, VideoInfo, detect, scan};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -30,10 +30,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Print when each slide appears
-    ///
-    /// The images are still decoded, into a temporary directory that is then deleted:
-    /// the library always extracts what it finds.
+    /// Print when each slide appears, without extracting any image
     Scan {
         #[command(flatten)]
         common: Common,
@@ -116,13 +113,11 @@ fn main() -> ExitCode {
 fn run(cli: Cli, cancelled: &AtomicBool) -> Result<(), Failure> {
     match cli.command {
         Command::Scan { common } => {
-            let staging = tempfile::tempdir()
-                .map_err(|error| format!("could not create a temporary directory: {error}"))?;
-            let slides = detect_slides(&common, staging.path(), cancelled)?;
+            let times = with_library(&common, cancelled, scan)?;
             let text = if common.json {
-                output::scan_json(&common.video, &slides)
+                output::scan_json(&common.video, &times)
             } else {
-                output::scan_table(&slides)
+                output::scan_table(&times)
             };
             print(&text)
         }
@@ -135,7 +130,9 @@ fn run(cli: Cli, cancelled: &AtomicBool) -> Result<(), Failure> {
                 .prefix(".slide-detect-")
                 .tempdir_in(&output)
                 .map_err(|error| format!("could not write to {}: {error}", output.display()))?;
-            let slides = detect_slides(&common, staging.path(), cancelled)?;
+            let slides = with_library(&common, cancelled, |ffmpeg, video, info, params, c, e| {
+                detect(ffmpeg, video, info, params, staging.path(), c, e)
+            })?;
             let mut files = Vec::with_capacity(slides.len());
             for (index, slide) in slides.iter().enumerate() {
                 let name = output::image_name(index + 1, slide.onset);
@@ -154,11 +151,19 @@ fn run(cli: Cli, cancelled: &AtomicBool) -> Result<(), Failure> {
     }
 }
 
-fn detect_slides(
+/// The checks and probe both commands need, then `call`: [`scan`] or [`detect`].
+fn with_library<T>(
     common: &Common,
-    dir: &Path,
     cancelled: &AtomicBool,
-) -> Result<Vec<Slide>, Failure> {
+    call: impl FnOnce(
+        &Path,
+        &Path,
+        VideoInfo,
+        &SlideParams,
+        &(dyn Fn() -> bool + Sync),
+        &mut dyn FnMut(Event),
+    ) -> Result<T, Error>,
+) -> Result<T, Failure> {
     let ffmpeg = ffmpeg::locate(common.ffmpeg.as_deref())?;
     let video = &common.video;
     if !video.exists() {
@@ -176,12 +181,11 @@ fn detect_slides(
         roi: common.roi,
     };
     let mut progress = Progress::new(common.quiet);
-    let result = detect(
+    let result = call(
         &ffmpeg,
         video,
         info,
         &params,
-        dir,
         &|| cancelled.load(Ordering::Relaxed),
         &mut |event| progress.event(event),
     );

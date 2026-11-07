@@ -72,8 +72,6 @@ It needs ffmpeg on `PATH`, or its path given with `--ffmpeg`.
 $ slide-detect scan lecture.mp4
 Scanning: about 3600 frames to sample
 Scanned 3600 frames: 42 slides
-Extracting 42 images
-Extracted 42 images
     #  ONSET         CAPTURE
     1  00:00:00.000  00:00:00.000
     2  00:01:07.000  00:01:12.000
@@ -88,8 +86,7 @@ $ slide-detect extract lecture.mp4 -o slides
 ```
 
 - `scan <VIDEO>` prints when each slide first appears (`ONSET`) and when its image
-  is taken (`CAPTURE`). The library always extracts what it finds, so `scan` decodes
-  the images too, into a temporary directory it deletes.
+  would be taken (`CAPTURE`), and writes no image.
 - `extract <VIDEO> -o <DIR>` writes a full-resolution JPEG of each slide, named by
   number and onset, replacing files of the same name. A failed or cancelled run
   leaves no images behind.
