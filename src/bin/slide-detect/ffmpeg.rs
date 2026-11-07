@@ -22,8 +22,8 @@ pub fn locate(explicit: Option<&Path>) -> Result<PathBuf, String> {
                 .to_owned()
         });
     };
-    if path.is_file() {
-        return Ok(path.to_owned());
+    if let Some(found) = existing(path, cfg!(windows)) {
+        return Ok(found);
     }
     let bare = path
         .parent()
@@ -37,19 +37,23 @@ fn search(name: &OsStr) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path)
         .filter(|dir| !dir.as_os_str().is_empty())
-        .flat_map(|dir| candidates(dir.join(name)))
-        .find(|candidate| candidate.is_file())
+        .find_map(|dir| existing(&dir.join(name), cfg!(windows)))
 }
 
-#[cfg(windows)]
-fn candidates(path: PathBuf) -> Vec<PathBuf> {
-    let exe = path.with_extension("exe");
-    vec![path, exe]
-}
-
-#[cfg(not(windows))]
-fn candidates(path: PathBuf) -> Vec<PathBuf> {
-    vec![path]
+/// `path` if it is a file; on Windows also `path` with `.exe` appended, as the
+/// shell finds `C:\ffmpeg\bin\ffmpeg`. Appended, not substituted: `ffmpeg-7.1`
+/// is `ffmpeg-7.1.exe`.
+fn existing(path: &Path, windows: bool) -> Option<PathBuf> {
+    if path.is_file() {
+        return Some(path.to_owned());
+    }
+    if !windows {
+        return None;
+    }
+    let mut exe = path.as_os_str().to_owned();
+    exe.push(".exe");
+    let exe = PathBuf::from(exe);
+    exe.is_file().then_some(exe)
 }
 
 /// Runs `ffmpeg -i`, which describes the input on stderr and exits. Once
@@ -188,6 +192,17 @@ At least one output file must be specified";
     fn a_codec_tag_is_not_a_size() {
         assert_eq!(size(" h264 (avc1 / 0x31637661)"), None);
         assert_eq!(size(" h264 (avc1 / 0x31637661), 320x240"), Some((320, 240)));
+    }
+
+    #[test]
+    fn windows_appends_exe_to_the_whole_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("ffmpeg-7.1.exe");
+        std::fs::write(&exe, b"").unwrap();
+        let given = dir.path().join("ffmpeg-7.1");
+        assert_eq!(existing(&given, true), Some(exe.clone()));
+        assert_eq!(existing(&given, false), None);
+        assert_eq!(existing(&exe, false), Some(exe));
     }
 
     #[test]
