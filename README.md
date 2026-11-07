@@ -48,10 +48,58 @@ for slide in slides {
 # Ok::<(), slide_detect::Error>(())
 ```
 
-`detect` blocks; run it on its own thread in an async program. It stops all ffmpeg
+`scan` takes the same arguments except the output directory, and returns each
+slide's `onset` and `capture` without extracting any image; `detect` is `scan`
+followed by the extraction.
+
+Both block; run them on their own thread in an async program. They stop all ffmpeg
 processes within about a tenth of a second of `cancelled` returning true.
 
-Not on crates.io yet; depend on it by Git revision.
+## Command-line tool
+
+The crate also builds `slide-detect`, a command-line tool over the same library,
+behind the `cli` feature. Library users do not get its dependencies.
+
+```sh
+cargo install --locked --git https://github.com/mizorewww/slide-detect --features cli
+```
+
+It needs ffmpeg on `PATH`, or its path given with `--ffmpeg`.
+
+```console
+$ slide-detect scan lecture.mp4
+Scanning: about 3600 frames to sample
+Scanned 3600 frames: 42 slides
+    #  ONSET         CAPTURE
+    1  00:00:00.000  00:00:00.000
+    2  00:01:07.000  00:01:12.000
+  ...
+
+$ slide-detect extract lecture.mp4 -o slides
+...
+    #  ONSET         CAPTURE       FILE
+    1  00:00:00.000  00:00:00.000  slide_0001_00-00-00.000.jpg
+    2  00:01:07.000  00:01:12.000  slide_0002_00-01-07.000.jpg
+  ...
+```
+
+- `scan <VIDEO>` prints when each slide first appears (`ONSET`) and when its image
+  would be taken (`CAPTURE`), and writes no image.
+- `extract <VIDEO> -o <DIR>` writes a full-resolution JPEG of each slide, named by
+  number and onset, replacing files of the same name. Images are extracted into a
+  hidden directory inside `<DIR>` and moved into place only once all of them exist
+  and every name is known to be replaceable, so a failed or cancelled run leaves
+  `<DIR>` as it was.
+- `--json` prints JSON instead of a table: `video`, (for `extract`) `output`, and
+  `slides`, each with `number`, `onset` and `capture` in seconds and (for `extract`)
+  `file`.
+- `--sample-interval`, `--similarity`, `--cooldown`, `--stable-secs` and
+  `--roi X1,Y1,X2,Y2` set the fields of `SlideParams`; the defaults are 1, 0.85, 5,
+  0 and the whole frame.
+- Progress goes to stderr; `--quiet` hides it. Ctrl-C or SIGTERM stops every ffmpeg
+  and exits.
+- Exit codes: 0 on success, 1 on failure, 2 on a usage error, 130 on Ctrl-C (SIGINT)
+  and 143 on SIGTERM.
 
 ## License
 

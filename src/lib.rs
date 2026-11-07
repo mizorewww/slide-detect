@@ -51,6 +51,15 @@ pub struct VideoInfo {
     pub duration: f64,
 }
 
+/// When one slide shows, as [`scan`] finds it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SlideTime {
+    /// When the picture first appeared: the time to align a transcript with.
+    pub onset: f64,
+    /// The last sample of the settled picture: where its image is taken.
+    pub capture: f64,
+}
+
 /// One detected slide. The image is `file_name` in the output directory.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Slide {
@@ -62,9 +71,9 @@ pub struct Slide {
     pub file_name: String,
 }
 
-/// What [`detect`] is doing, in order: one `ScanStarted`, any number of `Sampled`
-/// and `CandidateFound`, one `ScanFinished`; then, if anything was found, one
-/// `ExtractStarted` and one `Extracted` per slide.
+/// What [`scan`] or [`detect`] is doing, in order: one `ScanStarted`, any number of
+/// `Sampled` and `CandidateFound`, one `ScanFinished`; then, for [`detect`] only and
+/// if anything was found, one `ExtractStarted` and one `Extracted` per slide.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Event {
     /// `estimate` is the frame count the duration suggests, not a promise: variable
@@ -91,7 +100,7 @@ pub enum Event {
     },
 }
 
-/// Why [`detect`] stopped.
+/// Why [`scan`] or [`detect`] stopped.
 #[derive(Debug)]
 pub enum Error {
     /// `cancelled` returned true.
@@ -166,10 +175,33 @@ impl fmt::Display for ExtractError {
 
 impl std::error::Error for ExtractError {}
 
+/// Finds when each slide of `video` shows, without extracting any image: the first
+/// pass of [`detect`]. Blocking. `cancelled` is polled about ten times a second;
+/// once it returns true ffmpeg is killed and [`Error::Cancelled`] returned.
+/// `on_event` runs on the calling thread, and receives the scan's events only.
+/// A scan that finds nothing is [`Error::NoFrames`], so the result is never empty.
+pub fn scan(
+    ffmpeg: &Path,
+    video: &Path,
+    info: VideoInfo,
+    params: &SlideParams,
+    cancelled: &(dyn Fn() -> bool + Sync),
+    on_event: &mut dyn FnMut(Event),
+) -> Result<Vec<SlideTime>, Error> {
+    let times = scan::scan(ffmpeg, video, info, params, cancelled, on_event)?;
+    if times.is_empty() {
+        return Err(Error::NoFrames);
+    }
+    Ok(times
+        .into_iter()
+        .map(|(onset, capture)| SlideTime { onset, capture })
+        .collect())
+}
+
 /// Detects the slides of `video` and writes their images to `output_dir`, created if
-/// needed. Blocking. `cancelled` is polled about ten times a second; once it returns
-/// true every ffmpeg is killed and [`Error::Cancelled`] returned. `on_event` runs on
-/// the calling thread.
+/// needed: [`scan`], then one full-resolution JPEG per slide. Blocking. `cancelled`
+/// is polled about ten times a second; once it returns true every ffmpeg is killed
+/// and [`Error::Cancelled`] returned. `on_event` runs on the calling thread.
 pub fn detect(
     ffmpeg: &Path,
     video: &Path,
@@ -180,10 +212,7 @@ pub fn detect(
     on_event: &mut dyn FnMut(Event),
 ) -> Result<Vec<Slide>, Error> {
     std::fs::create_dir_all(output_dir).map_err(Error::Io)?;
-    let times = scan::scan(ffmpeg, video, info, params, cancelled, on_event)?;
-    if times.is_empty() {
-        return Err(Error::NoFrames);
-    }
+    let times = scan(ffmpeg, video, info, params, cancelled, on_event)?;
     extract::extract(ffmpeg, video, &times, output_dir, cancelled, on_event)
 }
 

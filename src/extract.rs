@@ -1,7 +1,7 @@
 //! The second pass: one full-resolution JPEG per slide.
 
 use crate::scan::tail_lines;
-use crate::{Error, Event, ExtractError, POLL, Slide};
+use crate::{Error, Event, ExtractError, POLL, Slide, SlideTime};
 use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -21,7 +21,7 @@ fn file_name(number: usize) -> String {
 pub(crate) fn extract(
     ffmpeg: &Path,
     video: &Path,
-    times: &[(f64, f64)],
+    times: &[SlideTime],
     output_dir: &Path,
     cancelled: &(dyn Fn() -> bool + Sync),
     on_event: &mut dyn FnMut(Event),
@@ -39,11 +39,11 @@ pub(crate) fn extract(
             scope.spawn(move || {
                 while !stop.load(Ordering::Relaxed) {
                     let index = next.fetch_add(1, Ordering::Relaxed);
-                    let Some((_, capture)) = times.get(index) else {
+                    let Some(time) = times.get(index) else {
                         return;
                     };
                     let dest = output_dir.join(file_name(index + 1));
-                    let result = extract_frame(ffmpeg, video, *capture, &dest, stop);
+                    let result = extract_frame(ffmpeg, video, time.capture, &dest, stop);
                     if sender.send((index, result)).is_err() {
                         return;
                     }
@@ -58,9 +58,9 @@ pub(crate) fn extract(
     Ok(times
         .iter()
         .enumerate()
-        .map(|(index, (onset, capture))| Slide {
-            onset: *onset,
-            capture: *capture,
+        .map(|(index, time)| Slide {
+            onset: time.onset,
+            capture: time.capture,
             file_name: file_name(index + 1),
         })
         .collect())
@@ -68,7 +68,7 @@ pub(crate) fn extract(
 
 fn wait(
     results: &std::sync::mpsc::Receiver<(usize, Result<(), ExtractError>)>,
-    times: &[(f64, f64)],
+    times: &[SlideTime],
     cancelled: &(dyn Fn() -> bool + Sync),
     on_event: &mut dyn FnMut(Event),
 ) -> Result<(), Error> {
@@ -88,7 +88,7 @@ fn wait(
             Ok((index, Err(source))) => {
                 return Err(Error::Extract {
                     number: index + 1,
-                    onset: times[index].0,
+                    onset: times[index].onset,
                     source,
                 });
             }
