@@ -253,7 +253,7 @@ fn with_library<T>(
         stable_secs: common.stable_secs,
         roi: common.roi,
     };
-    let mut progress = Progress::new(common.quiet);
+    let mut progress = Progress::new(common.quiet, info.duration > 0.0);
     let result = call(&ffmpeg, video, info, &params, &is_cancelled, &mut |event| {
         progress.event(event)
     });
