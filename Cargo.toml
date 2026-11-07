@@ -2,14 +2,17 @@
 name = "slide-detect"
 version = "0.1.0"
 edition = "2024"
+# image 0.25 needs 1.88.
+rust-version = "1.88"
 license = "MIT"
 description = "Find the slide changes in a lecture video with ffmpeg and SSIM, and extract a full-resolution image of each"
 repository = "https://github.com/mizorewww/slide-detect"
+homepage = "https://github.com/mizorewww/slide-detect"
+documentation = "https://docs.rs/slide-detect"
 readme = "README.md"
 keywords = ["slides", "video", "ffmpeg", "ssim", "scene-detection"]
-categories = ["multimedia::video"]
-# Consumed as a git dependency; see README.
-publish = false
+categories = ["multimedia::video", "command-line-utilities"]
+include = ["/src/**/*.rs", "/tests/**/*.rs", "/README.md", "/LICENSE"]
 
 [features]
 # The `slide-detect` command-line tool. Library users get none of its dependencies.

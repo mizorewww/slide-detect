@@ -55,8 +55,6 @@ followed by the extraction.
 Both block; run them on their own thread in an async program. They stop all ffmpeg
 processes within about a tenth of a second of `cancelled` returning true.
 
-Not on crates.io yet; depend on it by Git revision.
-
 ## Command-line tool
 
 The crate also builds `slide-detect`, a command-line tool over the same library,
