@@ -88,8 +88,10 @@ $ slide-detect extract lecture.mp4 -o slides
 - `scan <VIDEO>` prints when each slide first appears (`ONSET`) and when its image
   would be taken (`CAPTURE`), and writes no image.
 - `extract <VIDEO> -o <DIR>` writes a full-resolution JPEG of each slide, named by
-  number and onset, replacing files of the same name. A failed or cancelled run
-  leaves no images behind.
+  number and onset, replacing files of the same name. Images are extracted into a
+  hidden directory inside `<DIR>` and moved into place only once all of them exist
+  and every name is known to be replaceable, so a failed or cancelled run leaves
+  `<DIR>` as it was.
 - `--json` prints JSON instead of a table: `video`, (for `extract`) `output`, and
   `slides`, each with `number`, `onset` and `capture` in seconds and (for `extract`)
   `file`.

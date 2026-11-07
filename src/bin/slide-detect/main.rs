@@ -135,13 +135,16 @@ fn run(cli: Cli, cancelled: &AtomicBool) -> Result<(), Failure> {
             let slides = with_library(&common, cancelled, |ffmpeg, video, info, params, c, e| {
                 detect(ffmpeg, video, info, params, staging.path(), c, e)
             })?;
-            let mut files = Vec::with_capacity(slides.len());
-            for (index, slide) in slides.iter().enumerate() {
-                let name = output::image_name(index + 1, slide.onset);
-                let dest = output.join(&name);
+            let files: Vec<_> = slides
+                .iter()
+                .enumerate()
+                .map(|(index, slide)| output::image_name(index + 1, slide.onset))
+                .collect();
+            check_replaceable(&output, &files)?;
+            for (slide, name) in slides.iter().zip(&files) {
+                let dest = output.join(name);
                 std::fs::rename(staging.path().join(&slide.file_name), &dest)
                     .map_err(|error| format!("could not write {}: {error}", dest.display()))?;
-                files.push(name);
             }
             let text = if common.json {
                 output::extract_json(&common.video, &output, &slides, &files)
@@ -151,6 +154,28 @@ fn run(cli: Cli, cancelled: &AtomicBool) -> Result<(), Failure> {
             print(&text)
         }
     }
+}
+
+/// Every image's place must take a file before the first is moved, so a run does not
+/// stop with the directory half replaced. The directory itself is writable: the
+/// staging directory is in it.
+fn check_replaceable(dir: &Path, names: &[String]) -> Result<(), Failure> {
+    for name in names {
+        let dest = dir.join(name);
+        let problem = match std::fs::symlink_metadata(&dest) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => error.to_string(),
+            Ok(meta) if meta.is_dir() => "a directory is in the way".to_owned(),
+            Ok(meta) if meta.permissions().readonly() => "the file is read-only".to_owned(),
+            Ok(_) => continue,
+        };
+        return Err(format!(
+            "cannot write {}: {problem}; no image was written",
+            dest.display()
+        )
+        .into());
+    }
+    Ok(())
 }
 
 /// The checks and probe both commands need, then `call`: [`scan`] or [`detect`].

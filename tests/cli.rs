@@ -345,3 +345,35 @@ fn a_closed_stderr_is_not_a_panic() {
     drop(child.stderr.take());
     assert_eq!(child.wait().unwrap().code(), Some(1), "not 101, a panic");
 }
+
+#[test]
+fn an_image_that_cannot_be_replaced_writes_none() {
+    if !ffmpeg_available() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let video = lecture(dir.path());
+    let out = dir.path().join("slides");
+    // A directory where the second image belongs.
+    std::fs::create_dir_all(out.join("slide_0002_00-00-07.500.jpg")).unwrap();
+    let output = run(
+        &[
+            &["extract", "-q", "-o", out.to_str().unwrap()][..],
+            &TUNING[..],
+        ]
+        .concat(),
+        &video,
+    );
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        stderr(&output).contains("a directory is in the way; no image was written"),
+        "{}",
+        stderr(&output)
+    );
+    // Not even the first image, and no staging directory.
+    let names: Vec<_> = std::fs::read_dir(&out)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(names, ["slide_0002_00-00-07.500.jpg"]);
+}
