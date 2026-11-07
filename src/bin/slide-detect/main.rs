@@ -153,7 +153,7 @@ fn listen(signal: &Arc<AtomicUsize>) -> std::io::Result<()> {
 fn run(cli: Cli, cancelled: &AtomicUsize) -> Result<(), Failure> {
     match cli.command {
         Command::Scan { common } => {
-            let times = with_library(&common, cancelled, scan)?;
+            let times = Job::prepare(&common, cancelled)?.run(scan)?;
             let text = if common.json {
                 output::scan_json(&common.video, &times)
             } else {
@@ -162,6 +162,8 @@ fn run(cli: Cli, cancelled: &AtomicUsize) -> Result<(), Failure> {
             print(&text)
         }
         Command::Extract { common, output } => {
+            // Probe first: a mistyped video name creates no directory.
+            let job = Job::prepare(&common, cancelled)?;
             std::fs::create_dir_all(&output)
                 .map_err(|error| format!("could not create {}: {error}", output.display()))?;
             // Detect into a hidden directory beside the images, so a failed or
@@ -170,7 +172,7 @@ fn run(cli: Cli, cancelled: &AtomicUsize) -> Result<(), Failure> {
                 .prefix(".slide-detect-")
                 .tempdir_in(&output)
                 .map_err(|error| format!("could not write to {}: {error}", output.display()))?;
-            let slides = with_library(&common, cancelled, |ffmpeg, video, info, params, c, e| {
+            let slides = job.run(|ffmpeg, video, info, params, c, e| {
                 detect(ffmpeg, video, info, params, staging.path(), c, e)
             })?;
             let files: Vec<_> = slides
@@ -216,54 +218,83 @@ fn check_replaceable(dir: &Path, names: &[String]) -> Result<(), Failure> {
     Ok(())
 }
 
-/// The checks and probe both commands need, then `call`: [`scan`] or [`detect`].
-fn with_library<T>(
-    common: &Common,
-    cancelled: &AtomicUsize,
-    call: impl FnOnce(
-        &Path,
-        &Path,
-        VideoInfo,
-        &SlideParams,
-        &(dyn Fn() -> bool + Sync),
-        &mut dyn FnMut(Event),
-    ) -> Result<T, Error>,
-) -> Result<T, Failure> {
-    let ffmpeg = ffmpeg::locate(common.ffmpeg.as_deref())?;
-    let video = &common.video;
-    if !video.exists() {
-        return Err(format!("{}: no such file", video.display()).into());
-    }
-    if video.is_dir() {
-        return Err(format!("{}: is a directory, not a video", video.display()).into());
-    }
-    let is_cancelled = || cancelled.load(Ordering::Relaxed) != 0;
-    // A signal during the probe stops its ffmpeg, and is then the reason it failed.
-    let info = ffmpeg::probe(&ffmpeg, video, &is_cancelled).map_err(|message| {
-        if is_cancelled() {
-            Failure::Cancelled
-        } else {
-            Failure::Error(message)
+/// A video ready for the library: ffmpeg found, the video probed.
+struct Job<'a> {
+    common: &'a Common,
+    cancelled: &'a AtomicUsize,
+    ffmpeg: PathBuf,
+    info: VideoInfo,
+}
+
+impl<'a> Job<'a> {
+    /// The checks and probe both commands need, before either writes anything.
+    fn prepare(common: &'a Common, cancelled: &'a AtomicUsize) -> Result<Self, Failure> {
+        let ffmpeg = ffmpeg::locate(common.ffmpeg.as_deref())?;
+        let video = &common.video;
+        if !video.exists() {
+            return Err(format!("{}: no such file", video.display()).into());
         }
-    })?;
-    let params = SlideParams {
-        sample_interval: common.sample_interval,
-        similarity: common.similarity,
-        cooldown: common.cooldown,
-        stable_secs: common.stable_secs,
-        roi: common.roi,
-    };
-    let mut progress = Progress::new(common.quiet, info.duration > 0.0);
-    let result = call(&ffmpeg, video, info, &params, &is_cancelled, &mut |event| {
-        progress.event(event)
-    });
-    progress.finish();
-    // A Ctrl-C at a terminal reaches ffmpeg too, which may then fail before the
-    // library sees the flag: the user's cancel is the reason either way.
-    if is_cancelled() {
-        return Err(Failure::Cancelled);
+        if video.is_dir() {
+            return Err(format!("{}: is a directory, not a video", video.display()).into());
+        }
+        let is_cancelled = || cancelled.load(Ordering::Relaxed) != 0;
+        // A signal during the probe stops its ffmpeg, and is then the reason it failed.
+        let info = ffmpeg::probe(&ffmpeg, video, &is_cancelled).map_err(|message| {
+            if is_cancelled() {
+                Failure::Cancelled
+            } else {
+                Failure::Error(message)
+            }
+        })?;
+        Ok(Self {
+            common,
+            cancelled,
+            ffmpeg,
+            info,
+        })
     }
-    result.map_err(|error| describe(error, &ffmpeg, video))
+
+    fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Relaxed) != 0
+    }
+
+    /// Runs `call`, [`scan`] or [`detect`], with progress and cancelling.
+    fn run<T>(
+        &self,
+        call: impl FnOnce(
+            &Path,
+            &Path,
+            VideoInfo,
+            &SlideParams,
+            &(dyn Fn() -> bool + Sync),
+            &mut dyn FnMut(Event),
+        ) -> Result<T, Error>,
+    ) -> Result<T, Failure> {
+        let common = self.common;
+        let params = SlideParams {
+            sample_interval: common.sample_interval,
+            similarity: common.similarity,
+            cooldown: common.cooldown,
+            stable_secs: common.stable_secs,
+            roi: common.roi,
+        };
+        let mut progress = Progress::new(common.quiet, self.info.duration > 0.0);
+        let result = call(
+            &self.ffmpeg,
+            &common.video,
+            self.info,
+            &params,
+            &|| self.is_cancelled(),
+            &mut |event| progress.event(event),
+        );
+        progress.finish();
+        // A Ctrl-C at a terminal reaches ffmpeg too, which may then fail before the
+        // library sees the flag: the user's cancel is the reason either way.
+        if self.is_cancelled() {
+            return Err(Failure::Cancelled);
+        }
+        result.map_err(|error| describe(error, &self.ffmpeg, &common.video))
+    }
 }
 
 fn describe(error: Error, ffmpeg: &Path, video: &Path) -> Failure {

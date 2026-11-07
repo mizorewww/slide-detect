@@ -415,3 +415,19 @@ fn a_video_shorter_than_the_interval_is_explained() {
         stderr(&output)
     );
 }
+
+#[test]
+fn a_bad_video_creates_no_output_directory() {
+    if !ffmpeg_available() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("slides");
+    let broken = dir.path().join("broken.mp4");
+    std::fs::write(&broken, b"not a video").unwrap();
+    for video in [dir.path().join("missing.mp4"), broken] {
+        let output = run(&["extract", "-o", out.to_str().unwrap()], &video);
+        assert_eq!(output.status.code(), Some(1));
+        assert!(!out.exists(), "{}", stderr(&output));
+    }
+}
