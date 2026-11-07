@@ -63,7 +63,7 @@ The crate also builds `slide-detect`, a command-line tool over the same library,
 behind the `cli` feature. Library users do not get its dependencies.
 
 ```sh
-cargo install --git https://github.com/mizorewww/slide-detect --features cli
+cargo install --locked --git https://github.com/mizorewww/slide-detect --features cli
 ```
 
 It needs ffmpeg on `PATH`, or its path given with `--ffmpeg`.
