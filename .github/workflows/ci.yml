@@ -47,14 +47,10 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Build, CLI
         run: cargo build --locked --features cli
-      - name: Clippy, CLI
-        run: cargo clippy --all-targets --features cli -- -D warnings
       - name: Test, default features
         run: cargo test
       - name: Test, all features
         run: cargo test --all-features
-      - name: Test, CLI
-        run: cargo test --features cli
 
   deny:
     runs-on: ubuntu-latest
