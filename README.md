@@ -14,7 +14,7 @@ You need [ffmpeg](https://ffmpeg.org) at run time.
 
 ```toml
 [dependencies]
-slide-detect = { git = "https://github.com/mizorewww/slide-detect" }
+slide-detect = "0.1"
 ```
 
 ```rust,no_run
@@ -61,7 +61,7 @@ The crate also builds `slide-detect`, a command-line tool over the same library,
 behind the `cli` feature. Library users do not get its dependencies.
 
 ```sh
-cargo install --locked --git https://github.com/mizorewww/slide-detect --features cli
+cargo install --locked slide-detect --features cli
 ```
 
 It needs ffmpeg on `PATH`, or its path given with `--ffmpeg`.
