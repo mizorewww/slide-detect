@@ -213,7 +213,15 @@ pub fn detect(
 ) -> Result<Vec<Slide>, Error> {
     std::fs::create_dir_all(output_dir).map_err(Error::Io)?;
     let times = scan(ffmpeg, video, info, params, cancelled, on_event)?;
-    extract::extract(ffmpeg, video, &times, output_dir, cancelled, on_event)
+    extract::extract(
+        ffmpeg,
+        video,
+        &times,
+        params.sample_interval,
+        output_dir,
+        cancelled,
+        on_event,
+    )
 }
 
 /// How often a blocked wait looks at `cancelled`.

@@ -1,6 +1,6 @@
 //! The second pass: one full-resolution JPEG per slide.
 
-use crate::scan::tail_lines;
+use crate::scan::{Grid, tail_lines};
 use crate::{Error, Event, ExtractError, POLL, Slide, SlideTime};
 use std::io::Read;
 use std::path::Path;
@@ -22,11 +22,13 @@ pub(crate) fn extract(
     ffmpeg: &Path,
     video: &Path,
     times: &[SlideTime],
+    sample_interval: f64,
     output_dir: &Path,
     cancelled: &(dyn Fn() -> bool + Sync),
     on_event: &mut dyn FnMut(Event),
 ) -> Result<Vec<Slide>, Error> {
     let slides = times.len();
+    let grid = Grid::new(sample_interval);
     on_event(Event::ExtractStarted { slides });
     let next = AtomicUsize::new(0);
     // Set on the way out, whatever the reason, so running children are killed.
@@ -35,7 +37,7 @@ pub(crate) fn extract(
     std::thread::scope(|scope| {
         for _ in 0..CONCURRENCY.min(slides) {
             let sender = sender.clone();
-            let (next, stop) = (&next, &stop);
+            let (next, stop, grid) = (&next, &stop, &grid);
             scope.spawn(move || {
                 while !stop.load(Ordering::Relaxed) {
                     let index = next.fetch_add(1, Ordering::Relaxed);
@@ -43,7 +45,7 @@ pub(crate) fn extract(
                         return;
                     };
                     let dest = output_dir.join(file_name(index + 1));
-                    let result = extract_frame(ffmpeg, video, time.capture, &dest, stop);
+                    let result = extract_frame(ffmpeg, video, grid, time.capture, &dest, stop);
                     if sender.send((index, result)).is_err() {
                         return;
                     }
@@ -99,22 +101,35 @@ fn wait(
     Ok(())
 }
 
-/// One exact frame. A stopped extraction reports no error of its own: the caller is
-/// already leaving, for a reason it knows.
+/// The frame the scan sampled at `t`. A stopped extraction reports no error of its
+/// own: the caller is already leaving, for a reason it knows.
 fn extract_frame(
     ffmpeg: &Path,
     video: &Path,
+    grid: &Grid,
     t: f64,
     dest: &Path,
     stop: &AtomicBool,
 ) -> Result<(), ExtractError> {
-    let seek = format!("{t:.3}");
+    let seek = format!("{t:.6}");
+    // Not an accurate seek: that returns the first frame at or after `t`, whereas
+    // the scan sampled the last before `t` plus half a slot, and around a slide
+    // change the two are different slides. Instead decoding starts at the keyframe
+    // before `t`, with the scan's timestamps, and the scan's filter picks the slot.
+    let filter = grid.slot_filter(t);
     // -q:v 2 is JPEG's high-quality end (2 to 31, lower is better): slides are text.
     let mut child = Command::new(ffmpeg)
-        .args(["-hide_banner", "-loglevel", "error", "-y", "-ss", &seek])
+        .args(["-hide_banner", "-loglevel", "error", "-y"])
+        .args([
+            "-noaccurate_seek",
+            "-copyts",
+            "-start_at_zero",
+            "-ss",
+            &seek,
+        ])
         .arg("-i")
         .arg(video)
-        .args(["-frames:v", "1", "-q:v", "2"])
+        .args(["-vf", &filter, "-frames:v", "1", "-q:v", "2"])
         .arg(dest)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
