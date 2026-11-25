@@ -393,6 +393,19 @@ mod tests {
     }
 
     #[test]
+    fn no_frame_is_explained() {
+        let Failure::Error(message) =
+            describe(Error::NoFrames, Path::new("ffmpeg"), Path::new("short.mp4"))
+        else {
+            panic!("not an error");
+        };
+        assert!(
+            message.contains("the video may be shorter than --sample-interval"),
+            "{message}"
+        );
+    }
+
+    #[test]
     fn numbers_are_checked() {
         assert_eq!(positive("0.5"), Ok(0.5));
         assert!(positive("0").is_err());

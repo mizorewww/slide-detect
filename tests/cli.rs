@@ -407,13 +407,27 @@ fn a_video_shorter_than_the_interval_is_explained() {
     let dir = tempfile::tempdir().unwrap();
     let video = dir.path().join("short.mp4");
     make_video(&video, 1, &[("black", 0.5, 1.)]);
-    let output = run(&["scan", "-q", "--sample-interval", "5"], &video);
-    assert_eq!(output.status.code(), Some(1));
-    assert!(
-        stderr(&output).contains("the video may be shorter than --sample-interval"),
-        "{}",
-        stderr(&output)
-    );
+    let output = run(&["scan", "--json", "--sample-interval", "5"], &video);
+    // Before FFmpeg 9.1 the fps filter drops a slot that the video ends before half
+    // of; from 9.1 it keeps slot 0, which holds the first frame. Either outcome is
+    // right, as long as the first is explained.
+    if output.status.code() == Some(1) {
+        assert!(
+            stderr(&output).contains("the video may be shorter than --sample-interval"),
+            "{}",
+            stderr(&output)
+        );
+    } else {
+        assert!(output.status.success(), "{}", stderr(&output));
+        let value = json(&output);
+        let onsets: Vec<_> = value["slides"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|slide| slide["onset"].as_f64().unwrap())
+            .collect();
+        assert_eq!(onsets, [0.0]);
+    }
 }
 
 #[test]
