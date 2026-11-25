@@ -312,3 +312,52 @@ fn a_set_cancel_flag_stops_a_scan_alone() {
     );
     assert!(matches!(result, Err(Error::Cancelled)));
 }
+
+/// The mean gray level of an image, 0 to 255.
+fn mean_gray(image: &Path) -> u8 {
+    let output = Command::new(FFMPEG)
+        .args(["-hide_banner", "-loglevel", "error", "-i"])
+        .arg(image)
+        .args([
+            "-vf",
+            "scale=1:1:flags=area,format=gray",
+            "-f",
+            "rawvideo",
+            "-",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    output.stdout[0]
+}
+
+#[test]
+fn each_image_is_the_frame_the_scan_sampled() {
+    if !ffmpeg_available() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let video = dir.path().join("synthetic.mp4");
+    // Each page's first frame comes one frame after a sample's time, so the scan,
+    // which samples up to half an interval later, sees it; a seek to the sample's
+    // time would land on the page before.
+    make_video(&video, 9, &[("black", 3.05, 6.05), ("gray", 6.05, 9.)]);
+    for stable_secs in [0.0, 1.0] {
+        let params = SlideParams {
+            sample_interval: 1.0,
+            ..params(0.0, stable_secs)
+        };
+        let out = dir.path().join(format!("frames-{stable_secs}"));
+        let (slides, _) = run(&video, 9, params, &out);
+        let onsets: Vec<_> = slides.iter().map(|slide| slide.onset).collect();
+        assert_eq!(onsets, [0.0, 3.0, 6.0]);
+        let grays: Vec<_> = slides
+            .iter()
+            .map(|slide| mean_gray(&out.join(&slide.file_name)))
+            .collect();
+        assert!(
+            grays[0] > 230 && grays[1] < 25 && (100..160).contains(&grays[2]),
+            "white, black, gray; stable_secs {stable_secs}: {grays:?}"
+        );
+    }
+}
